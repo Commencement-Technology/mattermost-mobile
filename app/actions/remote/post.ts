@@ -40,6 +40,13 @@ type PostsRequest = {
     previousPostId?: string;
 }
 
+export type PostsForChannel = PostsRequest & {
+    actionType?: string;
+    authors?: UserProfile[];
+    channelId?: string;
+    error?: unknown;
+};
+
 type PostsObjectsRequest = {
     error?: unknown;
     order?: string[];
@@ -275,7 +282,7 @@ export const retryFailedPost = async (serverUrl: string, post: PostModel) => {
     return {};
 };
 
-export async function fetchPostsForChannel(serverUrl: string, channelId: string, fetchOnly = false) {
+export async function fetchPostsForChannel(serverUrl: string, channelId: string, fetchOnly = false): Promise<PostsForChannel> {
     try {
         if (!fetchOnly) {
             EphemeralStore.addLoadingMessagesForChannel(serverUrl, channelId);
@@ -312,7 +319,7 @@ export async function fetchPostsForChannel(serverUrl: string, channelId: string,
             }
         }
 
-        return {posts: data.posts, order: data.order, authors, actionType, previousPostId: data.previousPostId};
+        return {posts: data.posts, order: data.order, authors, actionType, previousPostId: data.previousPostId, channelId};
     } catch (error) {
         logDebug('error on fetchPostsForChannel', getFullErrorMessage(error));
         return {error};
@@ -323,12 +330,17 @@ export async function fetchPostsForChannel(serverUrl: string, channelId: string,
     }
 }
 
-export const fetchPostsForUnreadChannels = async (serverUrl: string, channels: Channel[], memberships: ChannelMembership[], excludeChannelId?: string) => {
-    const promises = [];
+export const fetchPostsForUnreadChannels = async (serverUrl: string, channels: Channel[], memberships: ChannelMembership[], excludeChannelId?: string, fetchOnly = false): Promise<PostsForChannel[]> => {
+    const membersMap = new Map<string, ChannelMembership>();
     for (const member of memberships) {
-        const channel = channels.find((c) => c.id === member.channel_id);
-        if (channel && !channel.delete_at && (channel.total_msg_count - member.msg_count) > 0 && channel.id !== excludeChannelId) {
-            promises.push(fetchPostsForChannel(serverUrl, channel.id));
+        membersMap.set(member.channel_id, member);
+    }
+
+    const promises = [];
+    for (const channel of channels) {
+        const member = membersMap.get(channel.id);
+        if (member && !channel.delete_at && (channel.total_msg_count - member.msg_count) > 0 && channel.id !== excludeChannelId) {
+            promises.push(fetchPostsForChannel(serverUrl, channel.id, fetchOnly));
         }
     }
     return Promise.all(promises);
